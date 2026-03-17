@@ -17,6 +17,88 @@ interface AgentServiceOptions {
   clientVersion: string;
 }
 
+function getAbortError(reason?: unknown): Error {
+  if (reason instanceof Error) {
+    return reason;
+  }
+
+  const error = new Error("Request aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+export function wrapAbortSafeStream(
+  stream: AsyncIterable<AgentServerMessage>,
+  signal: AbortSignal,
+): AsyncIterable<AgentServerMessage> {
+  return {
+    [Symbol.asyncIterator]() {
+      const iterator = stream[Symbol.asyncIterator]();
+      let done = false;
+
+      const closeIterator = async () => {
+        if (done) {
+          return { done: true, value: undefined as never };
+        }
+
+        done = true;
+        return (
+          (await iterator.return?.()) ?? {
+            done: true,
+            value: undefined as never,
+          }
+        );
+      };
+
+      return {
+        async next() {
+          if (done) {
+            return { done: true, value: undefined as never };
+          }
+
+          let cleanup = () => {};
+          try {
+            const aborted = new Promise<never>((_, reject) => {
+              const onAbort = () => reject(getAbortError(signal.reason));
+
+              if (signal.aborted) {
+                onAbort();
+                return;
+              }
+
+              signal.addEventListener("abort", onAbort, { once: true });
+              cleanup = () => {
+                signal.removeEventListener("abort", onAbort);
+              };
+            });
+
+            const result = await Promise.race([iterator.next(), aborted]);
+            if (result.done) {
+              done = true;
+            }
+            return result;
+          } catch (error) {
+            await closeIterator();
+            throw error;
+          } finally {
+            cleanup();
+          }
+        },
+        async return() {
+          return closeIterator();
+        },
+        async throw(error) {
+          done = true;
+          if (iterator.throw) {
+            return iterator.throw(error);
+          }
+          throw error;
+        },
+      };
+    },
+  };
+}
+
 class AgentService {
   private readonly client: Client<typeof AgentServiceDef>;
 
@@ -41,12 +123,21 @@ class AgentService {
 
   get rpcClient(): AgentRpcClient {
     const client = this.client;
+
     return {
       run(
         input: AsyncIterable<AgentClientMessage>,
         options?: { signal?: AbortSignal; headers?: Record<string, string> },
       ): AsyncIterable<AgentServerMessage> {
-        return client.run(input, options);
+        const response = client.run(input, {
+          ...(options?.headers ? { headers: options.headers } : {}),
+        });
+
+        if (!options?.signal) {
+          return response;
+        }
+
+        return wrapAbortSafeStream(response, options.signal);
       },
     };
   }

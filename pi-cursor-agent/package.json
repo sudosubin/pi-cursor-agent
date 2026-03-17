@@ -31,6 +31,7 @@
     "lint": "biome check",
     "format": "biome check --write",
     "typecheck": "tsc",
+    "test": "tsx --test $(find test -name '*.test.ts' -o -name '*.test.mts' -o -name '*.test.js' | sort)",
     "typecheck:watch": "tsc --watch",
     "proto:generate": "buf generate"
   },
@@ -46,6 +47,7 @@
     "@connectrpc/protoc-gen-connect-es": "^1.7.0",
     "@tsconfig/strictest": "^2.0.8",
     "@types/node": "^24.10.10",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
