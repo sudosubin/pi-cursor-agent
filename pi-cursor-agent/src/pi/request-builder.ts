@@ -62,7 +62,16 @@ function extractAssistantMessageText(msg: Message): string {
     .join("\n");
 }
 
-function buildConversationTurns(messages: Message[]): Uint8Array[] {
+function storeBlob(blobStore: BlobStore, bytes: Uint8Array): Uint8Array {
+  const blobId = getBlobId(bytes);
+  void blobStore.setBlob(null, blobId, bytes);
+  return new Uint8Array(Array.from(blobId));
+}
+
+function buildConversationTurns(
+  messages: Message[],
+  blobStore: BlobStore,
+): Uint8Array[] {
   const turns: Uint8Array[] = [];
 
   let i = 0;
@@ -92,9 +101,9 @@ function buildConversationTurns(messages: Message[]): Uint8Array[] {
       text: userText,
       messageId: crypto.randomUUID(),
     });
-    const userMessageBytes = userMessage.toBinary();
+    const userMessageBlobId = storeBlob(blobStore, userMessage.toBinary());
 
-    const stepBytes: Uint8Array[] = [];
+    const stepBlobIds: Uint8Array[] = [];
     i++;
     while (i < messages.length && messages[i]?.role !== "user") {
       const stepMsg = messages[i];
@@ -112,7 +121,7 @@ function buildConversationTurns(messages: Message[]): Uint8Array[] {
               value: new AssistantMessageProto({ text }),
             },
           });
-          stepBytes.push(step.toBinary());
+          stepBlobIds.push(storeBlob(blobStore, step.toBinary()));
         }
       } else if (stepMsg.role === "toolResult") {
         const text = toolResultToText(stepMsg as ToolResultMessage);
@@ -125,7 +134,7 @@ function buildConversationTurns(messages: Message[]): Uint8Array[] {
               }),
             },
           });
-          stepBytes.push(step.toBinary());
+          stepBlobIds.push(storeBlob(blobStore, step.toBinary()));
         }
       }
 
@@ -133,13 +142,13 @@ function buildConversationTurns(messages: Message[]): Uint8Array[] {
     }
 
     const agentTurn = new AgentConversationTurnStructure({
-      userMessage: new Uint8Array(userMessageBytes),
-      steps: stepBytes,
+      userMessage: userMessageBlobId as Uint8Array<ArrayBuffer>,
+      steps: stepBlobIds as Uint8Array<ArrayBuffer>[],
     });
     const turn = new ConversationTurnStructure({
       turn: { case: "agentConversationTurn", value: agentTurn },
     });
-    turns.push(turn.toBinary());
+    turns.push(storeBlob(blobStore, turn.toBinary()));
   }
 
   return turns;
@@ -220,18 +229,17 @@ export function buildRunRequest(
   });
 
   const cached = params.conversationState;
-  const hasMatchingPrompt = cached?.rootPromptMessagesJson?.some((entry) =>
-    Buffer.from(entry).equals(systemPromptId),
+  const turns = buildConversationTurns(
+    params.context.messages,
+    params.blobStore,
   );
 
-  const turns = buildConversationTurns(params.context.messages);
-
-  const baseState =
-    cached && hasMatchingPrompt
+  const conversationState =
+    cached && cached.rootPromptMessagesJson.length > 0
       ? cached
       : new ConversationStateStructureClass({
           rootPromptMessagesJson: [systemPromptId],
-          turns: [],
+          turns,
           todos: [],
           pendingToolCalls: [],
           previousWorkspaceUris: [],
@@ -243,11 +251,6 @@ export function buildRunRequest(
           selfSummaryCount: 0,
           readPaths: [],
         });
-
-  const conversationState = new ConversationStateStructureClass({
-    ...baseState,
-    turns: turns.length > 0 ? turns : baseState.turns,
-  });
 
   const modelDetails = new ModelDetails({
     modelId: params.model.id,
