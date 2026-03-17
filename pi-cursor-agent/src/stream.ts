@@ -169,6 +169,16 @@ export function streamCursorAgent(
 
     const sessionId = options?.sessionId ?? "default";
 
+    let lastFlushedRootBlobId: string | undefined;
+    const flushSessionState = async () => {
+      const snapshot = await persistAgentStore(sessionId);
+      if (!snapshot || snapshot.latestRootBlobId === lastFlushedRootBlobId) {
+        return;
+      }
+      lastFlushedRootBlobId = snapshot.latestRootBlobId;
+      pi.appendEntry(CURSOR_STATE_ENTRY_TYPE, snapshot);
+    };
+
     try {
       const apiKey = options?.apiKey;
       if (!apiKey) {
@@ -379,6 +389,11 @@ export function streamCursorAgent(
         output.ttft = firstTokenTime - startTime;
       }
 
+      try {
+        await flushSessionState();
+      } catch {
+        // ignore persistence errors
+      }
       stream.push({ type: "done", reason: "stop", message: output });
       stream.end();
     } catch (error) {
@@ -388,21 +403,17 @@ export function streamCursorAgent(
       output.duration = Date.now() - startTime;
       if (firstTokenTime) output.ttft = firstTokenTime - startTime;
       const errorReason = output.stopReason === "aborted" ? "aborted" : "error";
+      try {
+        await flushSessionState();
+      } catch {
+        // ignore persistence errors
+      }
       stream.push({
         type: "error",
         reason: errorReason,
         error: output,
       });
       stream.end();
-    } finally {
-      try {
-        const snapshot = await persistAgentStore(sessionId);
-        if (snapshot) {
-          pi.appendEntry(CURSOR_STATE_ENTRY_TYPE, snapshot);
-        }
-      } catch {
-        // ignore persistence errors
-      }
     }
   })();
 
