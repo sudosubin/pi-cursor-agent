@@ -37,9 +37,9 @@ function decodeMcpArgValue(bytes: Uint8Array): unknown {
 }
 
 /** Decode all MCP args from map<string, bytes> to a plain object. */
-function decodeMcpArgs(
-  args: { [key: string]: Uint8Array },
-): Record<string, unknown> {
+function decodeMcpArgs(args: {
+  [key: string]: Uint8Array;
+}): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
     result[key] = decodeMcpArgValue(value);

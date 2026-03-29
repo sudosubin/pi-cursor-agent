@@ -24,11 +24,11 @@ import { LocalDeleteExecutor } from "../executors/delete";
 import { LocalGrepExecutor } from "../executors/grep";
 import { LocalHookExecutorImpl } from "../executors/hook";
 import { LocalLsExecutor } from "../executors/ls";
+import { LocalMcpExecutor } from "../executors/mcp";
 import { LocalReadExecutor } from "../executors/read";
 import { LocalRequestContextExecutor } from "../executors/request-context";
 import { LocalShellExecutor } from "../executors/shell";
 import { LocalShellStreamExecutor } from "../executors/shell-stream";
-import { LocalMcpExecutor } from "../executors/mcp";
 import {
   StubBackgroundShellExecutor,
   StubComputerUseExecutor,
