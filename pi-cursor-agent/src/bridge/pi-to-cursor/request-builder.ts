@@ -234,6 +234,7 @@ interface BuildRunRequestParams {
   conversationState: ConversationStateStructure | undefined;
   mcpToolDefinitions?: McpToolDefinition[];
   state?: CursorStateStore;
+  systemPromptOverride?: string;
 }
 
 interface BuildRunRequestResult {
@@ -244,9 +245,14 @@ interface BuildRunRequestResult {
 export function buildRunRequest(
   params: BuildRunRequestParams,
 ): BuildRunRequestResult {
+  const content =
+    params.systemPromptOverride ??
+    params.context.systemPrompt ??
+    "You are a helpful assistant.";
+
   const systemPromptJson = JSON.stringify({
     role: "system",
-    content: params.context.systemPrompt || "You are a helpful assistant.",
+    content: content,
   });
   const systemPromptBytes = new TextEncoder().encode(systemPromptJson);
   const systemPromptId = getBlobId(systemPromptBytes);

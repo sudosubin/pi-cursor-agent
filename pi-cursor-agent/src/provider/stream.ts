@@ -28,6 +28,7 @@ import {
   rejectPendingForSession,
   type ToolExecRequest,
 } from "../bridge/cursor-to-pi/tool-bridge";
+import { preparePiContext } from "../bridge/pi-context";
 import {
   buildRunRequest,
   getContextTools,
@@ -396,9 +397,12 @@ export function streamCursorAgent(
           getChannel: () => channel,
         };
 
+        const piContext = await preparePiContext(context.systemPrompt ?? "");
+
         const resources = new LocalResourceProvider({
           ctx: piToolCtx,
           requestContextTools,
+          cursorRules: piContext.rules,
         });
 
         const blobStore = agentStore.getBlobStore();
@@ -412,6 +416,7 @@ export function streamCursorAgent(
           conversationState: agentStore.getConversationStateStructure(),
           mcpToolDefinitions: requestContextTools,
           state: overlayState,
+          systemPromptOverride: piContext.cleanedPrompt,
         });
         agentStore.conversationStateStructure = conversationState;
 

@@ -1,4 +1,5 @@
 import os from "node:os";
+import type { CursorRule } from "../../../__generated__/agent/v1/cursor_rules_pb";
 import type { McpToolDefinition } from "../../../__generated__/agent/v1/mcp_pb";
 import { GitRepoInfo } from "../../../__generated__/agent/v1/repo_pb";
 import type { RequestContextArgs } from "../../../__generated__/agent/v1/request_context_exec_pb";
@@ -23,11 +24,17 @@ export class LocalRequestContextExecutor
 {
   private readonly tools: McpToolDefinition[];
   private readonly workspacePaths: string[];
+  private readonly rules: CursorRule[];
   private readonly gitExecutor: LocalGitExecutor;
 
-  constructor(tools: McpToolDefinition[], workspacePaths: string[]) {
+  constructor(
+    tools: McpToolDefinition[],
+    workspacePaths: string[],
+    rules: CursorRule[] = [],
+  ) {
     this.tools = tools;
     this.workspacePaths = workspacePaths;
+    this.rules = rules;
     this.gitExecutor = new LocalGitExecutor();
   }
 
@@ -42,7 +49,7 @@ export class LocalRequestContextExecutor
       ]);
 
       const requestContext = new RequestContext({
-        rules: [],
+        rules: this.rules,
         env,
         repositoryInfo: [],
         tools: this.tools,

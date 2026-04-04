@@ -1,3 +1,4 @@
+import type { CursorRule } from "../../../__generated__/agent/v1/cursor_rules_pb";
 import type { McpToolDefinition } from "../../../__generated__/agent/v1/mcp_pb";
 import {
   backgroundShellResource,
@@ -46,6 +47,7 @@ interface LocalResourceProviderOptions {
   ctx: PiToolContext;
   requestContextTools?: McpToolDefinition[];
   workspacePaths?: string[];
+  cursorRules?: CursorRule[];
 }
 
 export class LocalResourceProvider extends RegistryResourceAccessor {
@@ -63,6 +65,7 @@ export class LocalResourceProvider extends RegistryResourceAccessor {
       new LocalRequestContextExecutor(
         requestContextTools,
         resolvedWorkspacePaths,
+        options.cursorRules ?? [],
       ),
     );
 
