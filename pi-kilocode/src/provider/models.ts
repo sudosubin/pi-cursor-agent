@@ -71,14 +71,23 @@ function toMillionDollarRate(perToken: number): number {
   return perToken * 1_000_000;
 }
 
+function isValidCacheFile(value: unknown): value is CachedModelsFile {
+  if (!value || typeof value !== "object") return false;
+  const c = value as Record<string, unknown>;
+  if (!c["data"] || typeof c["data"] !== "object") return false;
+  const d = c["data"] as Record<string, unknown>;
+  return Array.isArray(d["data"]);
+}
+
 function readCache(): CachedModelsFile | null {
   try {
     if (!fs.existsSync(PI_KILOCODE_MODELS_CACHE_FILE)) {
       return null;
     }
-    return JSON.parse(
+    const raw: unknown = JSON.parse(
       fs.readFileSync(PI_KILOCODE_MODELS_CACHE_FILE, "utf8"),
-    ) as CachedModelsFile;
+    );
+    return isValidCacheFile(raw) ? raw : null;
   } catch {
     return null;
   }
@@ -93,6 +102,9 @@ function isCacheStale(cache: CachedModelsFile | null) {
   );
 }
 
+// Model list responses can be large but are bounded; 50 MB is generous.
+const MAX_MODELS_RESPONSE_BYTES = 50 * 1024 * 1024;
+
 export async function fetchKiloModels(): Promise<KiloModelsResponse> {
   const res = await fetch(KILO_MODELS_URL, {
     headers: { "Content-Type": "application/json" },
@@ -103,7 +115,29 @@ export async function fetchKiloModels(): Promise<KiloModelsResponse> {
     throw new Error(`Kilo models fetch failed: ${res.status}`);
   }
 
-  return (await res.json()) as KiloModelsResponse;
+  const contentLength = res.headers.get("content-length");
+  if (
+    contentLength &&
+    Number.parseInt(contentLength, 10) > MAX_MODELS_RESPONSE_BYTES
+  ) {
+    throw new Error(
+      `Models response too large: ${contentLength} bytes (limit ${MAX_MODELS_RESPONSE_BYTES})`,
+    );
+  }
+
+  const text = await res.text();
+  if (text.length > MAX_MODELS_RESPONSE_BYTES) {
+    throw new Error(
+      `Models response body too large (limit ${MAX_MODELS_RESPONSE_BYTES} bytes)`,
+    );
+  }
+
+  const data = JSON.parse(text) as KiloModelsResponse;
+  if (!Array.isArray(data?.data)) {
+    throw new Error("Models response has unexpected shape");
+  }
+
+  return data;
 }
 
 function toPiModel(m: KiloModel): ProviderModelConfig {

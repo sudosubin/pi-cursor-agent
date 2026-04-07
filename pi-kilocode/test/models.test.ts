@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
-import { convertToPiModels, filterFreeModels } from "../src/provider/models";
+import {
+  convertToPiModels,
+  fetchKiloModels,
+  filterFreeModels,
+  getCachedPiModels,
+  resetPiKilocodeModelCacheForTests,
+} from "../src/provider/models";
+import { PI_KILOCODE_MODELS_CACHE_FILE } from "../src/lib/env";
 
 test("filterFreeModels keeps only models with isFree=true", () => {
   const filtered = filterFreeModels([
@@ -123,4 +132,93 @@ test("convertToPiModels drops image-only models and maps capabilities/pricing", 
     supportsStore: false,
     thinkingFormat: "openrouter",
   });
+});
+
+// ---------------------------------------------------------------------------
+// fetchKiloModels – response size limits and shape validation
+// ---------------------------------------------------------------------------
+
+test("fetchKiloModels throws when content-length header exceeds 50 MB limit", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = (async () =>
+    new Response("{}", {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(51 * 1024 * 1024), // 51 MB
+      },
+    })) as typeof fetch;
+
+  await assert.rejects(() => fetchKiloModels(), /too large/i);
+});
+
+test("fetchKiloModels throws when response shape is missing data array", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ data: "not-an-array" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+
+  await assert.rejects(() => fetchKiloModels(), /unexpected shape/i);
+});
+
+test("fetchKiloModels throws when response is not valid JSON", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = (async () =>
+    new Response("not json", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+
+  await assert.rejects(() => fetchKiloModels(), /SyntaxError|unexpected/i);
+});
+
+// ---------------------------------------------------------------------------
+// getCachedPiModels – tampered / invalid cache file
+// ---------------------------------------------------------------------------
+
+test("getCachedPiModels returns empty array when cache file contains invalid JSON", (t) => {
+  resetPiKilocodeModelCacheForTests();
+
+  fs.mkdirSync(path.dirname(PI_KILOCODE_MODELS_CACHE_FILE), { recursive: true });
+  fs.writeFileSync(PI_KILOCODE_MODELS_CACHE_FILE, "not json");
+  t.after(() => fs.rmSync(PI_KILOCODE_MODELS_CACHE_FILE, { force: true }));
+
+  assert.deepEqual(getCachedPiModels(), []);
+});
+
+test("getCachedPiModels returns empty array when cache file has wrong shape", (t) => {
+  resetPiKilocodeModelCacheForTests();
+
+  fs.mkdirSync(path.dirname(PI_KILOCODE_MODELS_CACHE_FILE), { recursive: true });
+  fs.writeFileSync(
+    PI_KILOCODE_MODELS_CACHE_FILE,
+    JSON.stringify({ data: { data: "not-an-array" } }),
+  );
+  t.after(() => fs.rmSync(PI_KILOCODE_MODELS_CACHE_FILE, { force: true }));
+
+  assert.deepEqual(getCachedPiModels(), []);
+});
+
+test("getCachedPiModels returns empty array when cache file has unexpected root type", (t) => {
+  resetPiKilocodeModelCacheForTests();
+
+  fs.mkdirSync(path.dirname(PI_KILOCODE_MODELS_CACHE_FILE), { recursive: true });
+  fs.writeFileSync(PI_KILOCODE_MODELS_CACHE_FILE, JSON.stringify([1, 2, 3]));
+  t.after(() => fs.rmSync(PI_KILOCODE_MODELS_CACHE_FILE, { force: true }));
+
+  assert.deepEqual(getCachedPiModels(), []);
 });

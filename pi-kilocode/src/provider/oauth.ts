@@ -12,6 +12,16 @@ const KILO_POLL_INTERVAL_MS = 3000;
 const KILO_TOKEN_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const KILO_ORGANIZATION_HEADER = "X-KiloCode-OrganizationId";
 
+// Auth responses are small; cap at 1 MB to prevent memory exhaustion from a
+// malicious or compromised server.
+const MAX_AUTH_RESPONSE_BYTES = 1 * 1024 * 1024;
+
+// Org IDs are server-supplied and get injected verbatim into HTTP headers.
+// Reject anything containing control characters (including CR/LF) to prevent
+// header-injection attacks. Modern fetch implementations also guard this, but
+// defence-in-depth is cheap here.
+const SAFE_HEADER_VALUE_RE = /^[^\r\n\x00-\x1f\x7f]+$/
+
 interface DeviceAuthInitiateResponse {
   code: string;
   verificationUrl: string;
@@ -57,9 +67,33 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
 async function fetchJson<T>(
   input: string,
   init?: RequestInit,
-): Promise<{ response: Response; data: T }> {
+): Promise<{ response: Response; data: T | null }> {
   const response = await fetch(input, init);
-  const data = (await response.json().catch(() => undefined)) as T;
+
+  const contentLength = response.headers.get("content-length");
+  if (
+    contentLength &&
+    Number.parseInt(contentLength, 10) > MAX_AUTH_RESPONSE_BYTES
+  ) {
+    throw new Error(
+      `Response too large: ${contentLength} bytes (limit ${MAX_AUTH_RESPONSE_BYTES})`,
+    );
+  }
+
+  const text = await response.text();
+  if (text.length > MAX_AUTH_RESPONSE_BYTES) {
+    throw new Error(
+      `Response body too large (limit ${MAX_AUTH_RESPONSE_BYTES} bytes)`,
+    );
+  }
+
+  let data: T | null = null;
+  try {
+    data = JSON.parse(text) as T;
+  } catch {
+    // caller must check for null on a successful status
+  }
+
   return { response, data };
 }
 
@@ -80,7 +114,10 @@ function getProfileName(profile: KiloProfileResponse) {
 
 function getOrganizationId(credentials: OAuthCredentials): string | undefined {
   const value = credentials["accountId"];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  // Reject values with control characters to prevent HTTP header injection.
+  if (!SAFE_HEADER_VALUE_RE.test(value)) return undefined;
+  return value;
 }
 
 function toOAuthCredentials(input: {
@@ -121,6 +158,10 @@ async function initiateDeviceAuth(): Promise<DeviceAuthInitiateResponse> {
     );
   }
 
+  if (!data) {
+    throw new Error("Device authorization response is missing or unparseable");
+  }
+
   return data;
 }
 
@@ -134,6 +175,10 @@ async function pollDeviceAuth(code: string): Promise<DeviceAuthPollResponse> {
   if (response.status === 410) return { status: "expired" };
   if (!response.ok) {
     throw new Error(`Failed to poll device authorization: ${response.status}`);
+  }
+
+  if (!data) {
+    throw new Error("Device auth poll response is missing or unparseable");
   }
 
   return data;
@@ -152,6 +197,10 @@ async function fetchProfile(token: string): Promise<KiloProfileResponse> {
       throw new Error("Invalid token");
     }
     throw new Error(`Failed to fetch profile: ${response.status}`);
+  }
+
+  if (!data) {
+    throw new Error("Profile response is missing or unparseable");
   }
 
   return data;
