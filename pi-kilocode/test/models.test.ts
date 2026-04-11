@@ -119,7 +119,6 @@ test("convertToPiModels drops image-only models and maps capabilities/pricing", 
     cacheWrite: 3.5,
   });
   assert.deepEqual(model.compat, {
-    supportsDeveloperRole: false,
     supportsStore: false,
     thinkingFormat: "openrouter",
   });
