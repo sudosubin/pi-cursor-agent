@@ -55,7 +55,7 @@ function createMockPi() {
   return { api: api as unknown as ExtensionAPI, providerCalls, handlers };
 }
 
-test("registers kilocode provider once and refreshes cache from live raw response using only free models on demand", async (t) => {
+test("registers kilocode provider once and refreshes cache from live raw response on demand", async (t) => {
   resetPiKilocodeModelCacheForTests();
 
   const hadCache = fs.existsSync(PI_KILOCODE_MODELS_CACHE_FILE);
@@ -195,7 +195,7 @@ test("registers kilocode provider once and refreshes cache from live raw respons
 
   assert.deepEqual(
     getCachedPiModels().map((model) => model.id),
-    ["demo/free-model:free"],
+    ["demo/paid-model", "demo/free-model:free"],
   );
 
   assert.equal(pi.providerCalls.length, 1);

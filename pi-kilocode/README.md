@@ -9,7 +9,7 @@ Use [Kilo Code](https://kilo.ai/)'s gateway directly from pi through Kilo's Open
 - Uses Kilo Gateway's OpenAI-compatible endpoint
 - Fetches the Kilo model catalog from `https://api.kilo.ai/api/gateway/models`
 - Caches the raw model response on disk
-- Registers **free text-capable models only**
+- Registers all text-capable models from the Kilo catalog
 - Supports anonymous usage for free models and browser-based Kilo login
 
 ## Installation
@@ -44,8 +44,6 @@ According to Kilo's public gateway documentation and behavior:
 
 ## Current limitations
 
-- Only **free** models are currently registered in pi
-- Paid models are not currently exposed in the `/model` list
 - Image-output-only models are intentionally hidden
 
 ## Requirements

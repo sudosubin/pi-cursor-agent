@@ -150,14 +150,10 @@ export function convertToPiModels(raw: KiloModel[]): ProviderModelConfig[] {
     .map(toPiModel);
 }
 
-export function filterFreeModels(raw: KiloModel[]): KiloModel[] {
-  return raw.filter((m) => m.isFree);
-}
-
 let updateInFlight: Promise<void> | null = null;
 
 export function getCachedPiModels(): ProviderModelConfig[] {
-  return convertToPiModels(filterFreeModels(readCache()?.data.data ?? []));
+  return convertToPiModels(readCache()?.data.data ?? []);
 }
 
 async function updateCachedPiModels() {

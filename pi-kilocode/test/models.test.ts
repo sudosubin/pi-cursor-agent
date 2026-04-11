@@ -1,56 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertToPiModels, filterFreeModels } from "../src/provider/models";
-
-test("filterFreeModels keeps only models with isFree=true", () => {
-  const filtered = filterFreeModels([
-    {
-      id: "demo/paid",
-      name: "Paid",
-      created: 1,
-      description: "Paid",
-      context_length: 1000,
-      architecture: {
-        input_modalities: ["text"],
-        output_modalities: ["text"],
-        tokenizer: "Other",
-      },
-      pricing: { prompt: "0.1", completion: "0.2" },
-      top_provider: {
-        is_moderated: false,
-        context_length: 1000,
-        max_completion_tokens: 100,
-      },
-      supported_parameters: [],
-      isFree: false,
-    },
-    {
-      id: "demo/free",
-      name: "Explicit free",
-      created: 2,
-      description: "Free",
-      context_length: 1000,
-      architecture: {
-        input_modalities: ["text"],
-        output_modalities: ["text"],
-        tokenizer: "Other",
-      },
-      pricing: { prompt: "0", completion: "0" },
-      top_provider: {
-        is_moderated: false,
-        context_length: 1000,
-        max_completion_tokens: 100,
-      },
-      supported_parameters: [],
-      isFree: true,
-    },
-  ] satisfies Parameters<typeof filterFreeModels>[0]);
-
-  assert.deepEqual(
-    filtered.map((model) => model.id),
-    ["demo/free"],
-  );
-});
+import { convertToPiModels } from "../src/provider/models";
 
 test("convertToPiModels drops image-only models and maps capabilities/pricing", () => {
   const converted = convertToPiModels([
