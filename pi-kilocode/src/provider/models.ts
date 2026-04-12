@@ -134,8 +134,7 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
     contextWindow: m.context_length,
     maxTokens: maxOut ?? 8192,
     compat: {
-      // supportsDeveloperRole intentionally omitted — let pi-ai's detectCompat
-      // auto-detect from baseUrl. Expected: true (kilo.ai not in isNonStandard).
+      // supportsDeveloperRole should be automatically inferred as true.
       supportsStore: false,
       thinkingFormat: supportsReasoning ? "openrouter" : undefined,
     },
