@@ -5,6 +5,7 @@ import type {
 } from "../../../__generated__/agent/v1/read_exec_pb";
 import {
   ReadError,
+  ReadFileNotFound,
   ReadRejected,
   ReadResult as ReadResultClass,
   ReadSuccess,
@@ -18,12 +19,29 @@ import type { PiToolContext } from "../local-resource-provider/types";
 import { decodeToolCallId } from "../local-resource-provider/types";
 import { requestToolExecution } from "../tool-bridge";
 
+/** True when Pi's read tool failed because the path is missing (maps to Cursor ReadFileNotFound). */
+function isMissingFileReadError(message: string): boolean {
+  const m = message.trim();
+  if (!m) return false;
+  if (/\bENOENT\b/.test(m)) return true;
+  if (/no such file or directory/i.test(m)) return true;
+  return false;
+}
+
 export function buildReadResultFromToolResult(
   path: string,
   result: ToolResultMessage,
 ): ReadResult {
   const text = toolResultToText(result);
   if (result.isError) {
+    if (isMissingFileReadError(text)) {
+      return new ReadResultClass({
+        result: {
+          case: "fileNotFound",
+          value: new ReadFileNotFound({ path }),
+        },
+      });
+    }
     return new ReadResultClass({
       result: {
         case: "error",
