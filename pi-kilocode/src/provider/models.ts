@@ -120,6 +120,19 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
   const cacheRead = parsePrice(m.pricing?.input_cache_read);
   const cacheWrite = parsePrice(m.pricing?.input_cache_write);
 
+  // Kilo gateway doesn't expose thinkingLevelMap in its model metadata.
+  // Claude 4.7 Opus supports xhigh via the `verbosity` parameter (OpenRouter API).
+  // We map thinking levels to verbosity values here so the openrouter handler
+  // can send `verbosity: "xhigh"` alongside `reasoning.effort`.
+  // Note: 'off' is NOT mapped here — it remains "none" (the default) to disable
+  // reasoning. The openrouter-verbosity patch only sets verbosity when mapped !== "none".
+  const isOpus47 =
+    supportsReasoning &&
+    (m.id.includes("opus-4.7") || m.id.includes("opus-4-7"));
+  const thinkingLevelMap = isOpus47
+    ? { minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh" }
+    : undefined;
+
   return {
     id: m.id,
     name: m.name,
@@ -133,6 +146,9 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
     },
     contextWindow: m.context_length,
     maxTokens: maxOut ?? 8192,
+    // @ts-expect-error — thinkingLevelMap exists at runtime on v0.74.0+
+    // but the compile-time types here target the older @mariozechner scope.
+    thinkingLevelMap,
     compat: {
       supportsDeveloperRole: false,
       supportsStore: false,
@@ -157,7 +173,7 @@ export function filterFreeModels(raw: KiloModel[]): KiloModel[] {
 let updateInFlight: Promise<void> | null = null;
 
 export function getCachedPiModels(): ProviderModelConfig[] {
-  return convertToPiModels(filterFreeModels(readCache()?.data.data ?? []));
+  return convertToPiModels(readCache()?.data.data ?? []);
 }
 
 async function updateCachedPiModels() {
