@@ -130,7 +130,13 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
     supportsReasoning &&
     (m.id.includes("opus-4.7") || m.id.includes("opus-4-7"));
   const thinkingLevelMap = isOpus47
-    ? { minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh" }
+    ? {
+        minimal: "low",
+        low: "low",
+        medium: "medium",
+        high: "high",
+        xhigh: "xhigh",
+      }
     : undefined;
 
   return {
