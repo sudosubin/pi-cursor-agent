@@ -145,7 +145,7 @@ export default (pi: ExtensionAPI) => {
 
   pi.registerProvider("cursor-agent", {
     baseUrl: CURSOR_API_URL,
-    apiKey: "CURSOR_ACCESS_TOKEN",
+    apiKey: "$CURSOR_ACCESS_TOKEN",
     api: "cursor-agent" as unknown as Api,
     streamSimple: (model, context, options) =>
       streamCursorAgent(pi, getCtx, state, model, context, options),
