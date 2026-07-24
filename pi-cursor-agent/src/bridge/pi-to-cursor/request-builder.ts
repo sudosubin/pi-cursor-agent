@@ -55,6 +55,33 @@ function extractUserMessageText(msg: Message): string {
     .trim();
 }
 
+/**
+ * Resolve the current-turn user text for Cursor's userMessageAction.
+ *
+ * Pi extensions (e.g. pi-subagents ambient roster) inject custom messages after
+ * the real prompt. convertToLlm maps those to consecutive trailing `user`
+ * messages. Taking only messages.at(-1) would drop the real prompt, so join
+ * the entire trailing consecutive-user block instead.
+ */
+function resolveCurrentUserText(messages: Message[]): string {
+  const trailing: string[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!msg || msg.role !== "user") break;
+    const text = extractUserMessageText(msg);
+    if (text) trailing.unshift(text);
+  }
+  return trailing.join("\n\n");
+}
+
+/** True when this user message is part of the open turn (no non-user after it). */
+function isInCurrentUserTurn(messages: Message[], index: number): boolean {
+  for (let j = index + 1; j < messages.length; j++) {
+    if (messages[j]?.role !== "user") return false;
+  }
+  return true;
+}
+
 /** Format content blocks (thinking, text, toolCall) into a single string. */
 function formatContentBlocks(blocks: unknown[]): string {
   const parts: string[] = [];
@@ -122,14 +149,9 @@ function buildConversationTurns(
       continue;
     }
 
-    let isLastUserMessage = true;
-    for (let j = i + 1; j < messages.length; j++) {
-      if (messages[j]?.role === "user") {
-        isLastUserMessage = false;
-        break;
-      }
-    }
-    if (isLastUserMessage) break;
+    // Trailing consecutive user messages (prompt + converted custom notes)
+    // belong to the current Cursor action, not seeded history turns.
+    if (isInCurrentUserTurn(messages, i)) break;
 
     const userText = extractUserMessageText(msg);
     if (!userText) {
@@ -258,8 +280,7 @@ export function buildRunRequest(
   const systemPromptId = getBlobId(systemPromptBytes);
   void params.blobStore.setBlob(null, systemPromptId, systemPromptBytes);
 
-  const lastMessage = params.context.messages.at(-1);
-  const userText = lastMessage ? extractUserMessageText(lastMessage) : "";
+  const userText = resolveCurrentUserText(params.context.messages);
   if (!userText) {
     throw new Error("Cannot send empty user message to Cursor API");
   }
