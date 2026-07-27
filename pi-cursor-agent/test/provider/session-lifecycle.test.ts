@@ -28,6 +28,7 @@ function createLiveSession(label: string) {
     channel: new LiveEventChannel(label),
     cursorRunPromise: Promise.resolve(),
     flushSessionState: async () => {},
+    sendConversationActions: async () => {},
     abort: () => {},
     startTime: Date.now(),
   };
@@ -84,6 +85,7 @@ test("terminateSession aborts the live session and rejects pending tool results"
     flushSessionState: async () => {
       flushed += 1;
     },
+    sendConversationActions: async () => {},
     abort: (reason?: string) => {
       abortReason = reason;
       resolveRun();

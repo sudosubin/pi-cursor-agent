@@ -1,3 +1,4 @@
+import type { ConversationAction } from "../__generated__/agent/v1/agent_pb";
 import type { ToolExecRequest } from "../bridge/cursor-to-pi/tool-bridge";
 
 export type ChannelEvent =
@@ -51,6 +52,7 @@ export interface LiveSession {
   channel: LiveEventChannel;
   cursorRunPromise: Promise<void>;
   flushSessionState: () => Promise<void>;
+  sendConversationActions: (actions: ConversationAction[]) => Promise<void>;
   abort: (reason?: string) => void;
   startTime: number;
   firstTokenTime?: number;

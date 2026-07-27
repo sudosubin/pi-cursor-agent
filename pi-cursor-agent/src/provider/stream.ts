@@ -30,6 +30,7 @@ import {
 } from "../bridge/cursor-to-pi/tool-bridge";
 import { preparePiContext } from "../bridge/pi-context";
 import {
+  buildContinuationActions,
   buildRunRequest,
   getContextTools,
 } from "../bridge/pi-to-cursor/request-builder";
@@ -59,6 +60,7 @@ import {
   setLiveSession,
 } from "./agent-stream-hook";
 import { toCursorId } from "./model-mapping";
+import { terminateSession } from "./session-lifecycle";
 import { type CursorStateStore, createOverlayState } from "./state";
 
 function createCheckpointHandler(
@@ -371,6 +373,24 @@ export function streamCursorAgent(
     try {
       session = getLiveSession(sessionId);
 
+      if (session) {
+        const continuationActions = buildContinuationActions(context);
+        if (continuationActions.length > 0) {
+          try {
+            await session.sendConversationActions(continuationActions);
+          } catch {
+            // Cursor may have completed after Pi stopped at a tool boundary.
+            // Preserve its checkpoint, retire the stale transport, and replay
+            // the new user action as the first action of a fresh connection.
+            await terminateSession(
+              sessionId,
+              "Restarting Cursor session for new input",
+            );
+            session = undefined;
+          }
+        }
+      }
+
       if (!session) {
         const apiKey = options?.apiKey;
         if (!apiKey) {
@@ -493,6 +513,8 @@ export function streamCursorAgent(
           channel,
           cursorRunPromise,
           flushSessionState,
+          sendConversationActions: (actions) =>
+            connectClient.sendConversationActions(actions),
           abort: (reason) => {
             sessionAbortController.abort(
               reason ? new Error(reason) : new Error("Session ended"),

@@ -55,6 +55,52 @@ function extractUserMessageText(msg: Message): string {
     .trim();
 }
 
+function resolveCurrentUserTexts(messages: Message[]): string[] {
+  const trailing: string[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (!message || message.role !== "user") break;
+    const text = extractUserMessageText(message);
+    if (text) trailing.unshift(text);
+  }
+  return trailing;
+}
+
+function isInCurrentUserTurn(messages: Message[], index: number): boolean {
+  for (let i = index + 1; i < messages.length; i++) {
+    if (messages[i]?.role !== "user") return false;
+  }
+  return true;
+}
+
+function createUserMessageAction(text: string): ConversationAction {
+  const userMessage = new UserMessage({
+    text,
+    messageId: crypto.randomUUID(),
+  });
+
+  return new ConversationAction({
+    action: {
+      case: "userMessageAction",
+      value: new UserMessageAction({ userMessage }),
+    },
+  });
+}
+
+/**
+ * Build the user actions added by Pi between Cursor tool boundaries.
+ *
+ * Without steering, a continuation context ends in a tool result. Trailing
+ * user messages therefore represent new input that must be forwarded into the
+ * still-running Cursor conversation. Pi can deliver more than one message at
+ * once, so preserve the original order of the entire trailing user block.
+ */
+export function buildContinuationActions(
+  context: Context,
+): ConversationAction[] {
+  return resolveCurrentUserTexts(context.messages).map(createUserMessageAction);
+}
+
 /** Format content blocks (thinking, text, toolCall) into a single string. */
 function formatContentBlocks(blocks: unknown[]): string {
   const parts: string[] = [];
@@ -122,14 +168,7 @@ function buildConversationTurns(
       continue;
     }
 
-    let isLastUserMessage = true;
-    for (let j = i + 1; j < messages.length; j++) {
-      if (messages[j]?.role === "user") {
-        isLastUserMessage = false;
-        break;
-      }
-    }
-    if (isLastUserMessage) break;
+    if (isInCurrentUserTurn(messages, i)) break;
 
     const userText = extractUserMessageText(msg);
     if (!userText) {
@@ -258,23 +297,14 @@ export function buildRunRequest(
   const systemPromptId = getBlobId(systemPromptBytes);
   void params.blobStore.setBlob(null, systemPromptId, systemPromptBytes);
 
-  const lastMessage = params.context.messages.at(-1);
-  const userText = lastMessage ? extractUserMessageText(lastMessage) : "";
+  const userText = resolveCurrentUserTexts(params.context.messages).join(
+    "\n\n",
+  );
   if (!userText) {
     throw new Error("Cannot send empty user message to Cursor API");
   }
 
-  const userMessage = new UserMessage({
-    text: userText,
-    messageId: crypto.randomUUID(),
-  });
-
-  const action = new ConversationAction({
-    action: {
-      case: "userMessageAction",
-      value: new UserMessageAction({ userMessage }),
-    },
-  });
+  const action = createUserMessageAction(userText);
 
   const cached = params.conversationState;
   const turns = buildConversationTurns(
