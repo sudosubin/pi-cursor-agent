@@ -78,6 +78,31 @@ function createCheckpointHandler(
 }
 
 const QUERY_REJECTION_REASON = "Not supported";
+const ABORT_ERROR_NAME = "AbortError";
+const REQUEST_CANCELLED_MESSAGE = "Request cancelled";
+const SESSION_ENDED_MESSAGE = "Session ended";
+const REQUEST_ABORTED_MESSAGE = "Request aborted";
+
+function isAbortLikeError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) {
+    return true;
+  }
+
+  if (error instanceof DOMException && error.name === ABORT_ERROR_NAME) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === ABORT_ERROR_NAME ||
+    error.message === REQUEST_CANCELLED_MESSAGE ||
+    error.message === SESSION_ENDED_MESSAGE ||
+    error.message === REQUEST_ABORTED_MESSAGE
+  );
+}
 
 function createInteractionListenerAdapter(
   onUpdate: (update: CoreInteractionUpdate) => void,
@@ -279,6 +304,13 @@ async function consumeUntilBoundary(
         finalizeAllContent(contentState, output, stream);
         return { reason: "stop", tools: [] };
       }
+
+      case "cursor-error": {
+        finalizeAllContent(contentState, output, stream);
+        throw event.error instanceof Error
+          ? event.error
+          : new Error(String(event.error));
+      }
     }
   }
 }
@@ -369,6 +401,7 @@ export function streamCursorAgent(
       timestamp: Date.now(),
     };
     let session: LiveSession | undefined;
+    let effectiveSignal = options?.signal;
 
     try {
       session = getLiveSession(sessionId);
@@ -408,6 +441,7 @@ export function streamCursorAgent(
         const sessionSignal = options?.signal
           ? AbortSignal.any([options.signal, sessionAbortController.signal])
           : sessionAbortController.signal;
+        effectiveSignal = sessionSignal;
 
         const piToolCtx: PiToolContext = {
           cwd,
@@ -506,7 +540,7 @@ export function streamCursorAgent(
         const cursorRunPromise = connectClient
           .run(initialRequest, runOptions)
           .then(() => channel.push({ kind: "cursor-done" }))
-          .catch(() => channel.push({ kind: "cursor-done" }))
+          .catch((error) => channel.push({ kind: "cursor-error", error }))
           .finally(() => channel.markDone());
 
         session = {
@@ -592,13 +626,14 @@ export function streamCursorAgent(
           flushed = true;
         } catch {}
         deleteLiveSession(sessionId);
-        await session.cursorRunPromise.catch(() => {});
+        await session.cursorRunPromise;
         await evictAgentStore(sessionId, { persist: !flushed }).catch(() => {});
         stream.push({ type: "done", reason: "stop", message: output });
       }
       stream.end();
     } catch (error) {
-      output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+      const wasAborted = isAbortLikeError(error, effectiveSignal);
+      output.stopReason = wasAborted ? "aborted" : "error";
       output.errorMessage =
         error instanceof Error ? error.message : String(error);
       let flushed = false;
@@ -617,7 +652,7 @@ export function streamCursorAgent(
       await evictAgentStore(sessionId, { persist: !flushed }).catch(() => {});
       stream.push({
         type: "error",
-        reason: output.stopReason === "aborted" ? "aborted" : "error",
+        reason: wasAborted ? "aborted" : "error",
         error: { ...output },
       });
       stream.end();

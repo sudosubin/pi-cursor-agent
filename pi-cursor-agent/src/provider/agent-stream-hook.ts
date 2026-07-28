@@ -5,7 +5,8 @@ export type ChannelEvent =
   | { kind: "content"; data: ContentEvent }
   | { kind: "tool-exec-request"; request: ToolExecRequest }
   | { kind: "token-delta"; tokens: number }
-  | { kind: "cursor-done" };
+  | { kind: "cursor-done" }
+  | { kind: "cursor-error"; error: unknown };
 
 export interface ContentEvent {
   kind: "thinking-delta" | "text-delta" | "thinking-completed";
