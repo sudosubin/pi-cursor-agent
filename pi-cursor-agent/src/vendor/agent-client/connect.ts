@@ -91,6 +91,15 @@ interface PendingConversationAction {
   action: ConversationAction;
 }
 
+class ConversationActionRunClosed extends Error {
+  constructor() {
+    super("Cursor conversation run closed before accepting the action");
+    this.name = "ConversationActionRunClosed";
+  }
+}
+
+const RUN_CLOSED = Symbol("run-closed");
+
 function getUserActionMessageId(
   action: ConversationAction,
 ): string | undefined {
@@ -137,10 +146,13 @@ export class AgentConnectClient {
     for (const item of pending) {
       try {
         await writer(item.action);
-      } catch {
-        // Keep the action pending. The active run will either retry its
-        // transport or replay unacknowledged actions from the latest checkpoint.
-        return;
+      } catch (error) {
+        if (error instanceof ConversationActionRunClosed) {
+          // Keep the action pending. run() will replay it from the latest
+          // checkpoint when the cleanly closed attempt finishes.
+          return;
+        }
+        throw error;
       }
     }
   }
@@ -328,36 +340,32 @@ export class AgentConnectClient {
 
     void baseRequestStream.write(initialRequest);
 
-    const conversationActionWriter = (action: ConversationAction) =>
-      baseRequestStream.write(
-        new AgentClientMessage({
-          message: { case: "conversationAction", value: action },
-        }),
-      );
+    let runClosed = false;
+    let resolveRunClosed!: () => void;
+    const runClosedPromise = new Promise<typeof RUN_CLOSED>((resolve) => {
+      resolveRunClosed = () => resolve(RUN_CLOSED);
+    });
+    const conversationActionWriter = async (action: ConversationAction) => {
+      try {
+        const result = await Promise.race([
+          baseRequestStream.write(
+            new AgentClientMessage({
+              message: { case: "conversationAction", value: action },
+            }),
+          ),
+          runClosedPromise,
+        ]);
+        if (result === RUN_CLOSED) {
+          throw new ConversationActionRunClosed();
+        }
+      } catch (error) {
+        if (runClosed && !(error instanceof ConversationActionRunClosed)) {
+          throw new ConversationActionRunClosed();
+        }
+        throw error;
+      }
+    };
     this.conversationActionWriter = conversationActionWriter;
-
-    const runOptions: {
-      signal?: AbortSignal;
-      headers?: Record<string, string>;
-    } = {};
-    if (options.signal) runOptions.signal = options.signal;
-    if (options.headers) runOptions.headers = options.headers;
-
-    const response = this.client.run(baseRequestStream, runOptions);
-    const initialAction = (initialRequest.message.value as AgentRunRequest)
-      .action;
-    const initialUserMessageId = initialAction
-      ? getUserActionMessageId(initialAction)
-      : undefined;
-
-    for (const pending of this.pendingConversationActions) {
-      if (pending.key === initialUserMessageId) continue;
-      void conversationActionWriter(pending.action).catch(() => {});
-    }
-
-    const channels: SplitChannels = splitStream(response, stallDetector, () =>
-      options.onConnectionStateChange?.({ state: "connected" }),
-    );
 
     // Heartbeat sender using setTimeout (not setInterval)
     let heartbeatTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -385,9 +393,32 @@ export class AgentConnectClient {
       }
     };
 
-    scheduleHeartbeat();
-
     try {
+      const runOptions: {
+        signal?: AbortSignal;
+        headers?: Record<string, string>;
+      } = {};
+      if (options.signal) runOptions.signal = options.signal;
+      if (options.headers) runOptions.headers = options.headers;
+
+      const response = this.client.run(baseRequestStream, runOptions);
+      const initialAction = (initialRequest.message.value as AgentRunRequest)
+        .action;
+      const initialUserMessageId = initialAction
+        ? getUserActionMessageId(initialAction)
+        : undefined;
+
+      for (const pending of this.pendingConversationActions) {
+        if (pending.key === initialUserMessageId) continue;
+        void conversationActionWriter(pending.action).catch(() => {});
+      }
+
+      const channels: SplitChannels = splitStream(response, stallDetector, () =>
+        options.onConnectionStateChange?.({ state: "connected" }),
+      );
+
+      scheduleHeartbeat();
+
       const execOutputStream = new MapWritable<
         ExecClientMessage | ExecClientControlMessage,
         AgentClientMessage
@@ -471,6 +502,8 @@ export class AgentConnectClient {
       }
     } finally {
       clearHeartbeat();
+      runClosed = true;
+      resolveRunClosed();
       if (this.conversationActionWriter === conversationActionWriter) {
         this.conversationActionWriter = undefined;
       }

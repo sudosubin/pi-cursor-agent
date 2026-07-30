@@ -17,9 +17,7 @@ function errResult(text: string): ToolResultMessage {
 test("ENOENT maps to ReadResult fileNotFound", () => {
   const r = buildReadResultFromToolResult(
     "missing.txt",
-    errResult(
-      "ENOENT: no such file or directory, access '/tmp/missing.txt'",
-    ),
+    errResult("ENOENT: no such file or directory, access '/tmp/missing.txt'"),
   );
   assert.equal(r.result.case, "fileNotFound");
   if (r.result.case === "fileNotFound") {
