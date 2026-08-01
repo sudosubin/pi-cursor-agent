@@ -16,7 +16,10 @@ import {
   CURSOR_CLIENT_VERSION,
   CURSOR_WEBSITE_URL,
 } from "./lib/env";
-import { restoreAgentStoreFromBranch } from "./provider/agent-store";
+import {
+  isExternallyManagedSubagentSession,
+  restoreAgentStoreFromBranch,
+} from "./provider/agent-store";
 import {
   getCachedPiModels,
   updateCachedPiModelsIfStale,
@@ -91,12 +94,19 @@ export default (pi: ExtensionAPI) => {
   const refreshBranchState = async (ctx: ExtensionContext) => {
     lastCtx = ctx;
     const sessionId = ctx.sessionManager.getSessionId();
+    const sessionHeader = ctx.sessionManager.getHeader();
     await cleanupPreviousSession(sessionId);
     state.resetFromContext(ctx);
     try {
       await restoreAgentStoreFromBranch(
         sessionId,
         ctx.sessionManager.getBranch(),
+        ctx.sessionManager.getEntries(),
+        sessionHeader?.timestamp,
+        isExternallyManagedSubagentSession(
+          ctx.sessionManager.getSessionFile(),
+          process.env["PI_SUBAGENT_SESSION"],
+        ),
       );
     } catch {}
     retainOnlyActiveSessionMemory(sessionId);
@@ -118,11 +128,6 @@ export default (pi: ExtensionAPI) => {
   });
 
   pi.on("session_start", async (_, ctx) => {
-    await refreshBranchState(ctx);
-    updateCachedModelsFromContextInBackground(ctx);
-  });
-
-  pi.on("session_switch", async (_, ctx) => {
     await refreshBranchState(ctx);
     updateCachedModelsFromContextInBackground(ctx);
   });

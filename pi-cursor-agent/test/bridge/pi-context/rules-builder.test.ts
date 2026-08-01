@@ -19,6 +19,20 @@ function parsed(overrides: Partial<ParsedPiContext> = {}): ParsedPiContext {
   return { contextFiles: [], skills: [], cleanedPrompt: "", ...overrides };
 }
 
+test("cleaned system prompt becomes an always-applied global rule", async () => {
+  const rules = await buildCursorRules(
+    parsed({ cleanedPrompt: "You are figma-scout.\n\nFollow the contract." }),
+  );
+
+  assert.equal(rules.length, 1);
+  assert.equal(rules[0]?.fullPath, "/__pi__/system-prompt.md");
+  assert.equal(rules[0]?.type?.type.case, "global");
+  assert.equal(
+    rules[0]?.content,
+    "You are figma-scout.\n\nFollow the contract.",
+  );
+});
+
 test("context files become global rules, skills become agentFetched rules", async () => {
   await withTempDir(async (dir) => {
     const skillPath = join(dir, "SKILL.md");

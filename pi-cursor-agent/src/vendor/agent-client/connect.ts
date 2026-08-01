@@ -86,11 +86,82 @@ async function backoff(attempt: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+interface PendingConversationAction {
+  key: string;
+  action: ConversationAction;
+}
+
+class ConversationActionRunClosed extends Error {
+  constructor() {
+    super("Cursor conversation run closed before accepting the action");
+    this.name = "ConversationActionRunClosed";
+  }
+}
+
+const RUN_CLOSED = Symbol("run-closed");
+
+function getUserActionMessageId(
+  action: ConversationAction,
+): string | undefined {
+  if (action.action.case !== "userMessageAction") return undefined;
+  return action.action.value.userMessage?.messageId || undefined;
+}
+
+function getConversationActionKey(action: ConversationAction): string {
+  return getUserActionMessageId(action) ?? crypto.randomUUID();
+}
+
 export class AgentConnectClient {
   private readonly client: AgentRpcClient;
+  private readonly pendingConversationActions: PendingConversationAction[] = [];
+  private conversationActionWriter:
+    | ((action: ConversationAction) => Promise<void>)
+    | undefined;
 
   constructor(client: AgentRpcClient) {
     this.client = client;
+  }
+
+  async sendConversationAction(action: ConversationAction): Promise<void> {
+    await this.sendConversationActions([action]);
+  }
+
+  async sendConversationActions(actions: ConversationAction[]): Promise<void> {
+    const writer = this.conversationActionWriter;
+    if (!writer) {
+      throw new Error("Cursor conversation is not accepting new actions");
+    }
+
+    const pending: PendingConversationAction[] = [];
+    for (const action of actions) {
+      const key = getConversationActionKey(action);
+      if (this.pendingConversationActions.some((item) => item.key === key)) {
+        continue;
+      }
+      const item = { key, action };
+      this.pendingConversationActions.push(item);
+      pending.push(item);
+    }
+
+    for (const item of pending) {
+      try {
+        await writer(item.action);
+      } catch (error) {
+        if (error instanceof ConversationActionRunClosed) {
+          // Keep the action pending. run() will replay it from the latest
+          // checkpoint when the cleanly closed attempt finishes.
+          return;
+        }
+        throw error;
+      }
+    }
+  }
+
+  private acknowledgeUserMessage(messageId: string): void {
+    const index = this.pendingConversationActions.findIndex(
+      (item) => item.key === messageId,
+    );
+    if (index >= 0) this.pendingConversationActions.splice(index, 1);
   }
 
   /**
@@ -121,6 +192,8 @@ export class AgentConnectClient {
     const mcpTools = runRequest.mcpTools;
     const conversationId = runRequest.conversationId;
     let attempt = 0;
+    let unacknowledgedClosureKey: string | undefined;
+    let unacknowledgedClosureAttempts = 0;
     const receivedNewCheckpoint = { value: false };
 
     // Helper: switch to ResumeAction if we received a checkpoint
@@ -132,6 +205,20 @@ export class AgentConnectClient {
       currentAction = new ConversationAction({
         action: { case: "resumeAction", value: new ResumeAction() },
       });
+    };
+
+    const trackingInteractionListener: InteractionListener = {
+      sendUpdate: async (ctx, update) => {
+        if (update.type === "user-message-appended") {
+          const messageId = (update.userMessage as { messageId?: unknown })
+            .messageId;
+          if (typeof messageId === "string") {
+            this.acknowledgeUserMessage(messageId);
+          }
+        }
+        await options.interactionListener.sendUpdate(ctx, update);
+      },
+      query: (ctx, query) => options.interactionListener.query(ctx, query),
     };
 
     // Wrap checkpoint handler to track when we receive new checkpoints
@@ -167,9 +254,38 @@ export class AgentConnectClient {
 
         await this.runInternal(request, {
           ...options,
+          interactionListener: trackingInteractionListener,
           checkpointHandler: trackingCheckpointHandler,
         });
-        return;
+
+        const pending = this.pendingConversationActions[0];
+        if (!pending) return;
+
+        const checkpoint = options.checkpointHandler.getLatestCheckpoint?.();
+        if (!checkpoint) {
+          throw new Error(
+            "Cursor closed before acknowledging steering input and no checkpoint is available",
+          );
+        }
+
+        if (unacknowledgedClosureKey === pending.key) {
+          unacknowledgedClosureAttempts += 1;
+        } else {
+          unacknowledgedClosureKey = pending.key;
+          unacknowledgedClosureAttempts = 1;
+        }
+        if (unacknowledgedClosureAttempts > MAX_RETRY_ATTEMPTS) {
+          throw new Error(
+            "Cursor repeatedly closed before acknowledging steering input",
+          );
+        }
+
+        // Cursor closed before acknowledging this action. Re-open from its
+        // latest checkpoint with the same action and message ID as the initial
+        // action. Keep it pending until Cursor explicitly appends it.
+        currentState = checkpoint;
+        currentAction = pending.action;
+        attempt = 0;
       } catch (error) {
         if (!isRetriableError(error) || attempt >= MAX_RETRY_ATTEMPTS) {
           throw error;
@@ -224,18 +340,32 @@ export class AgentConnectClient {
 
     void baseRequestStream.write(initialRequest);
 
-    const runOptions: {
-      signal?: AbortSignal;
-      headers?: Record<string, string>;
-    } = {};
-    if (options.signal) runOptions.signal = options.signal;
-    if (options.headers) runOptions.headers = options.headers;
-
-    const response = this.client.run(baseRequestStream, runOptions);
-
-    const channels: SplitChannels = splitStream(response, stallDetector, () =>
-      options.onConnectionStateChange?.({ state: "connected" }),
-    );
+    let runClosed = false;
+    let resolveRunClosed!: () => void;
+    const runClosedPromise = new Promise<typeof RUN_CLOSED>((resolve) => {
+      resolveRunClosed = () => resolve(RUN_CLOSED);
+    });
+    const conversationActionWriter = async (action: ConversationAction) => {
+      try {
+        const result = await Promise.race([
+          baseRequestStream.write(
+            new AgentClientMessage({
+              message: { case: "conversationAction", value: action },
+            }),
+          ),
+          runClosedPromise,
+        ]);
+        if (result === RUN_CLOSED) {
+          throw new ConversationActionRunClosed();
+        }
+      } catch (error) {
+        if (runClosed && !(error instanceof ConversationActionRunClosed)) {
+          throw new ConversationActionRunClosed();
+        }
+        throw error;
+      }
+    };
+    this.conversationActionWriter = conversationActionWriter;
 
     // Heartbeat sender using setTimeout (not setInterval)
     let heartbeatTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -263,9 +393,32 @@ export class AgentConnectClient {
       }
     };
 
-    scheduleHeartbeat();
-
     try {
+      const runOptions: {
+        signal?: AbortSignal;
+        headers?: Record<string, string>;
+      } = {};
+      if (options.signal) runOptions.signal = options.signal;
+      if (options.headers) runOptions.headers = options.headers;
+
+      const response = this.client.run(baseRequestStream, runOptions);
+      const initialAction = (initialRequest.message.value as AgentRunRequest)
+        .action;
+      const initialUserMessageId = initialAction
+        ? getUserActionMessageId(initialAction)
+        : undefined;
+
+      for (const pending of this.pendingConversationActions) {
+        if (pending.key === initialUserMessageId) continue;
+        void conversationActionWriter(pending.action).catch(() => {});
+      }
+
+      const channels: SplitChannels = splitStream(response, stallDetector, () =>
+        options.onConnectionStateChange?.({ state: "connected" }),
+      );
+
+      scheduleHeartbeat();
+
       const execOutputStream = new MapWritable<
         ExecClientMessage | ExecClientControlMessage,
         AgentClientMessage
@@ -349,6 +502,11 @@ export class AgentConnectClient {
       }
     } finally {
       clearHeartbeat();
+      runClosed = true;
+      resolveRunClosed();
+      if (this.conversationActionWriter === conversationActionWriter) {
+        this.conversationActionWriter = undefined;
+      }
       baseRequestStream.close();
     }
   }

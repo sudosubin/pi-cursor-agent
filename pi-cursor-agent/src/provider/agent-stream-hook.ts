@@ -1,10 +1,12 @@
+import type { ConversationAction } from "../__generated__/agent/v1/agent_pb";
 import type { ToolExecRequest } from "../bridge/cursor-to-pi/tool-bridge";
 
 export type ChannelEvent =
   | { kind: "content"; data: ContentEvent }
   | { kind: "tool-exec-request"; request: ToolExecRequest }
   | { kind: "token-delta"; tokens: number }
-  | { kind: "cursor-done" };
+  | { kind: "cursor-done" }
+  | { kind: "cursor-error"; error: unknown };
 
 export interface ContentEvent {
   kind: "thinking-delta" | "text-delta" | "thinking-completed";
@@ -51,6 +53,7 @@ export interface LiveSession {
   channel: LiveEventChannel;
   cursorRunPromise: Promise<void>;
   flushSessionState: () => Promise<void>;
+  sendConversationActions: (actions: ConversationAction[]) => Promise<void>;
   abort: (reason?: string) => void;
   startTime: number;
   firstTokenTime?: number;
