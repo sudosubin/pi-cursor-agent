@@ -67,7 +67,14 @@ async function agentFetchedRule(skill: PiSkillRef): Promise<CursorRule> {
 export async function buildCursorRules(
   parsed: ParsedPiContext,
 ): Promise<CursorRule[]> {
+  // Cursor appends its own provider system prompt after the root conversation
+  // message, so models may ignore Pi's earlier system message. Mirror the
+  // cleaned Pi instructions into an always-applied global rule as well.
+  const systemPrompt = parsed.cleanedPrompt.trim();
+  const systemRules = systemPrompt
+    ? [globalRule("/__pi__/system-prompt.md", systemPrompt)]
+    : [];
   const globals = parsed.contextFiles.map((f) => globalRule(f.path, f.content));
   const skills = await Promise.all(parsed.skills.map(agentFetchedRule));
-  return [...globals, ...skills];
+  return [...systemRules, ...globals, ...skills];
 }

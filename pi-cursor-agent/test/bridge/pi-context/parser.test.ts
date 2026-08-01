@@ -80,11 +80,43 @@ test("cleanedPrompt keeps metadata and Pi documentation", () => {
     }),
   );
 
+  assert.ok(
+    result.cleanedPrompt.includes("You are an expert coding assistant."),
+  );
   assert.ok(result.cleanedPrompt.includes("Current date:"));
   assert.ok(result.cleanedPrompt.includes("Current working directory:"));
   assert.ok(result.cleanedPrompt.includes("Pi documentation"));
   assert.ok(result.cleanedPrompt.includes("- Main documentation:"));
   assert.ok(!result.cleanedPrompt.includes("Available tools:"));
+});
+
+test("cleanedPrompt preserves custom agent instructions", () => {
+  const contract = [
+    "You are `figma-scout`, a read-only Figma evidence agent.",
+    "",
+    "## Boundaries",
+    "",
+    "Inspect Figma only and never mutate the document.",
+  ].join("\n");
+  const generated = buildPrompt({
+    contextFiles: [{ path: "/AGENTS.md", content: "Project rules." }],
+    skills: [
+      {
+        name: "ask-user",
+        description: "Ask focused questions.",
+        location: "/SKILL.md",
+      },
+    ],
+  });
+  const result = parsePiSystemPrompt(
+    generated.replace("You are an expert coding assistant.", contract),
+  );
+
+  assert.ok(result.cleanedPrompt.includes(contract));
+  assert.ok(!result.cleanedPrompt.includes("Available tools:"));
+  assert.ok(!result.cleanedPrompt.includes("Project rules."));
+  assert.ok(!result.cleanedPrompt.includes("<available_skills>"));
+  assert.ok(result.cleanedPrompt.includes("Current working directory:"));
 });
 
 test("returns empty for prompt without context or skills", () => {

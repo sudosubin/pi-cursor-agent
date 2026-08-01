@@ -86,12 +86,37 @@ const PRESERVED_PATTERNS = [
   /^Current working directory: .+$/m,
 ];
 
-function buildCleanedPrompt(original: string, hasExtracted: boolean): string {
-  const lines = PRESERVED_PATTERNS.map((re) => original.match(re)?.[0]).filter(
-    (s): s is string => s != null,
-  );
+// Pi appends generated tool/context/skill metadata after the caller-provided
+// system instructions. Cursor receives those sections through native tools and
+// RequestContext.rules, but the instruction prefix must remain in the root
+// prompt — especially for agents using `system-prompt: replace`.
+const GENERATED_SECTION_MARKERS = [
+  "\nAvailable tools:",
+  "\nPi documentation",
+  `\n${CONTEXT_HEADING}`,
+  `\n${SKILLS_OPEN}`,
+  "\nCurrent date:",
+  "\nCurrent working directory:",
+];
 
-  return lines.length === 0 && !hasExtracted ? original : lines.join("\n");
+function extractInstructionPrefix(prompt: string): string {
+  let end = prompt.length;
+  for (const marker of GENERATED_SECTION_MARKERS) {
+    const index = prompt.indexOf(marker);
+    if (index !== -1 && index < end) end = index;
+  }
+  return prompt.slice(0, end).trim();
+}
+
+function buildCleanedPrompt(original: string, hasExtracted: boolean): string {
+  const instructionPrefix = extractInstructionPrefix(original);
+  const preserved = [
+    instructionPrefix,
+    ...PRESERVED_PATTERNS.map((re) => original.match(re)?.[0]),
+  ].filter((s): s is string => Boolean(s));
+
+  if (preserved.length === 0 && !hasExtracted) return original;
+  return [...new Set(preserved)].join("\n\n");
 }
 
 export function parsePiSystemPrompt(systemPrompt: string): ParsedPiContext {

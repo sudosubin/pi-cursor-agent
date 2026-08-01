@@ -132,11 +132,6 @@ export default (pi: ExtensionAPI) => {
     updateCachedModelsFromContextInBackground(ctx);
   });
 
-  pi.on("session_switch", async (_, ctx) => {
-    await refreshBranchState(ctx);
-    updateCachedModelsFromContextInBackground(ctx);
-  });
-
   pi.on("session_tree", async (_, ctx) => {
     await refreshBranchState(ctx);
   });
