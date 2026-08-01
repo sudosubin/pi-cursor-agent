@@ -121,15 +121,16 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
   const cacheWrite = parsePrice(m.pricing?.input_cache_write);
 
   // Kilo gateway doesn't expose thinkingLevelMap in its model metadata.
-  // Claude 4.7 Opus supports xhigh via the `verbosity` parameter (OpenRouter API).
+  // Claude 4.7/4.8 Opus supports xhigh via the `verbosity` parameter (OpenRouter API).
   // We map thinking levels to verbosity values here so the openrouter handler
   // can send `verbosity: "xhigh"` alongside `reasoning.effort`.
   // Note: 'off' is NOT mapped here — it remains "none" (the default) to disable
   // reasoning. The openrouter-verbosity patch only sets verbosity when mapped !== "none".
-  const isOpus47 =
+  const isAdaptiveOpus =
     supportsReasoning &&
-    (m.id.includes("opus-4.7") || m.id.includes("opus-4-7"));
-  const thinkingLevelMap = isOpus47
+    (m.id.includes("opus-4.7") || m.id.includes("opus-4-7") ||
+     m.id.includes("opus-4.8") || m.id.includes("opus-4-8"));
+  const thinkingLevelMap = isAdaptiveOpus
     ? {
         minimal: "low",
         low: "low",
