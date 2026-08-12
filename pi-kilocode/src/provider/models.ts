@@ -120,6 +120,36 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
   const cacheRead = parsePrice(m.pricing?.input_cache_read);
   const cacheWrite = parsePrice(m.pricing?.input_cache_write);
 
+  // Kilo gateway doesn't expose thinkingLevelMap in its model metadata.
+  // Claude 4.7/4.8 Opus supports xhigh via the `verbosity` parameter (OpenRouter API).
+  // We map thinking levels to verbosity values here so the openrouter handler
+  // can send `verbosity: "xhigh"` alongside `reasoning.effort`.
+  // Note: 'off' is NOT mapped here — it remains "none" (the default) to disable
+  // reasoning. The openrouter-verbosity patch only sets verbosity when mapped !== "none".
+  const isAdaptiveOpus =
+    supportsReasoning &&
+    (m.id.includes("opus-4.7") ||
+      m.id.includes("opus-4-7") ||
+      m.id.includes("opus-4.8") ||
+      m.id.includes("opus-4-8"));
+  const thinkingLevelMap = isAdaptiveOpus
+    ? {
+        minimal: "low",
+        low: "low",
+        medium: "medium",
+        high: "high",
+        xhigh: "xhigh",
+      }
+    : // qwen/qwen3.8-max is the one id wired for a thinking-preserving failover,
+      // so the map is scoped to it and to a single level. pi's clamp
+      // default-supports off…high for any reasoning model; only the opt-in
+      // xhigh/max levels need an explicit key (in general), and THIS route needs
+      // xhigh. identity ({ xhigh: "xhigh" }) sends the provider the requested
+      // level verbatim — no remap, so the clamp preserves it exactly.
+      supportsReasoning && m.id === "qwen/qwen3.8-max"
+      ? { xhigh: "xhigh" }
+      : undefined;
+
   return {
     id: m.id,
     name: m.name,
@@ -133,6 +163,9 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
     },
     contextWindow: m.context_length,
     maxTokens: maxOut ?? 8192,
+    // @ts-expect-error — thinkingLevelMap exists at runtime on v0.74.0+
+    // but the compile-time types here target the older @mariozechner scope.
+    thinkingLevelMap,
     compat: {
       // supportsDeveloperRole should be automatically inferred as true.
       supportsStore: false,

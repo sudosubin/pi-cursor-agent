@@ -193,6 +193,8 @@ test("registers kilocode provider once and refreshes cache from live raw respons
     ["demo/paid-model", "demo/free-model:free", "demo/image-only:free"],
   );
 
+  // After removing filterFreeModels, all non-image-only models are returned
+  // (including paid models — the gateway handles billing).
   assert.deepEqual(
     getCachedPiModels().map((model) => model.id),
     ["demo/paid-model", "demo/free-model:free"],
