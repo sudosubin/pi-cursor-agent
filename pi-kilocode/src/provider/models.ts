@@ -128,8 +128,10 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
   // reasoning. The openrouter-verbosity patch only sets verbosity when mapped !== "none".
   const isAdaptiveOpus =
     supportsReasoning &&
-    (m.id.includes("opus-4.7") || m.id.includes("opus-4-7") ||
-     m.id.includes("opus-4.8") || m.id.includes("opus-4-8"));
+    (m.id.includes("opus-4.7") ||
+      m.id.includes("opus-4-7") ||
+      m.id.includes("opus-4.8") ||
+      m.id.includes("opus-4-8"));
   const thinkingLevelMap = isAdaptiveOpus
     ? {
         minimal: "low",
@@ -138,7 +140,15 @@ function toPiModel(m: KiloModel): ProviderModelConfig {
         high: "high",
         xhigh: "xhigh",
       }
-    : undefined;
+    : // qwen/qwen3.8-max is the one id wired for a thinking-preserving failover,
+      // so the map is scoped to it and to a single level. pi's clamp
+      // default-supports off…high for any reasoning model; only the opt-in
+      // xhigh/max levels need an explicit key (in general), and THIS route needs
+      // xhigh. identity ({ xhigh: "xhigh" }) sends the provider the requested
+      // level verbatim — no remap, so the clamp preserves it exactly.
+      supportsReasoning && m.id === "qwen/qwen3.8-max"
+      ? { xhigh: "xhigh" }
+      : undefined;
 
   return {
     id: m.id,
