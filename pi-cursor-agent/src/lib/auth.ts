@@ -43,11 +43,19 @@ class AuthManager {
     }
 
     try {
-      const { accessToken, refreshToken } = await this.auth.exchangeUserApiKey({
+      const { accessToken } = await this.auth.exchangeUserApiKey({
         token: credentials.refresh || credentials.access,
       });
       const expires = getTokenExpiry(accessToken);
-      return { access: accessToken, refresh: refreshToken, expires };
+      // Keep the original refresh credential: exchangeUserApiKey returns a
+      // JWT that cannot be used for a subsequent exchange. The stored
+      // refresh value (e.g. a long-lived `crsr_` API key) is the only
+      // credential that stays valid across refreshes.
+      return {
+        access: accessToken,
+        refresh: credentials.refresh,
+        expires,
+      };
     } catch {
       // If the refresh token is invalid, try to refresh it with access token
       if (credentials.access && credentials.refresh) {
